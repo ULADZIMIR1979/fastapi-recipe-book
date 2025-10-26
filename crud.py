@@ -3,14 +3,17 @@
 Содержит функции для работы с базой данных
 """
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from models import Recipe, Ingredient
-from schemas import RecipeCreate
-from typing import List, Optional
+import logging
+from typing import Optional, Sequence
 
-print("🛠️ Создаем CRUD операции для работы с базой данных...")
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from models import Ingredient, Recipe
+from schemas import RecipeCreate
+
+logger = logging.getLogger(__name__)
 
 
 class CRUDRecipe:
@@ -19,15 +22,12 @@ class CRUDRecipe:
     """
 
     async def get_recipes(
-        self,
-        db: AsyncSession,
-        skip: int = 0,
-        limit: int = 100
-    ) -> List[Recipe]:
+        self, db: AsyncSession, skip: int = 0, limit: int = 100
+    ) -> Sequence[Recipe]:
         """
         Получить все рецепты, отсортированные по популярности и времени готовки
         """
-        print(f"📖 Получаем список рецептов (пропустить: {skip}, лимит: {limit})")
+        logger.info("Получаем список рецептов (пропустить: %s, лимит: %s)", skip, limit)
 
         query = (
             select(Recipe)
@@ -40,49 +40,43 @@ class CRUDRecipe:
         result = await db.execute(query)
         recipes = result.scalars().all()
 
-        print(f"✅ Найдено {len(recipes)} рецептов")
+        logger.info("Найдено %s рецептов", len(recipes))
         return recipes
 
     async def get_recipe(self, db: AsyncSession, recipe_id: int) -> Optional[Recipe]:
         """
         Получить рецепт по ID и увеличить счетчик просмотров
         """
-        print(f"🔍 Ищем рецепт с ID: {recipe_id}")
+        logger.info("Ищем рецепт с ID: %s", recipe_id)
 
-        query = (
-            select(Recipe)
-            .options(selectinload(Recipe.ingredients))
-            .where(Recipe.id == recipe_id)
-        )
+        query = select(Recipe).where(Recipe.id == recipe_id)  # type: ignore
         result = await db.execute(query)
         recipe = result.scalar_one_or_none()
 
         if recipe:
-            print(f"✅ Рецепт найден: '{recipe.title}', текущие просмотры: {recipe.views}")
-            recipe.views += 1
+            logger.info(
+                "Рецепт найден: '%s', просмотры: %s", recipe.title, recipe.views
+            )
+            recipe.views += 1  # type: ignore
             await db.commit()
             await db.refresh(recipe)
-            print(f"📈 Увеличили счетчик просмотров до: {recipe.views}")
+            logger.info("Увеличили счетчик просмотров до: %s", recipe.views)
         else:
-            print(f"❌ Рецепт с ID {recipe_id} не найден")
+            logger.warning("Рецепт с ID %s не найден", recipe_id)
 
         return recipe
 
-    async def create_recipe(
-        self,
-        db: AsyncSession,
-        recipe: RecipeCreate
-    ) -> Recipe:
+    async def create_recipe(self, db: AsyncSession, recipe: RecipeCreate) -> Recipe:
         """
         Создать новый рецепт с ингредиентами
         """
-        print(f"🆕 Создаем новый рецепт: '{recipe.title}'")
-        print(f"📝 Ингредиенты: {recipe.ingredient_names}")
+        logger.info("Создаем новый рецепт: '%s'", recipe.title)
+        logger.info("Ингредиенты: %s", recipe.ingredient_names)
 
         # Сначала создаем все ингредиенты
         ingredients = []
         for ingredient_name in recipe.ingredient_names:
-            print(f"🔎 Обрабатываем ингредиент: '{ingredient_name}'")
+            logger.info("Обрабатываем ингредиент: '%s'", ingredient_name)
 
             # Проверяем существет ли ингредиент
             query = select(Ingredient).where(Ingredient.name == ingredient_name)
@@ -90,47 +84,46 @@ class CRUDRecipe:
             existing_ingredient = result.scalar_one_or_none()
 
             if existing_ingredient:
-                print(f"✅ Ингредиент '{ingredient_name}' уже существует")
+                logger.info("Ингредиент '%s' уже существует", ingredient_name)
                 ingredients.append(existing_ingredient)
             else:
                 # Создаем новый ингредиент
-                print(f"🆕 Создаем новый ингредиент: '{ingredient_name}'")
+                logger.info("Создаем новый ингредиент: '%s'", ingredient_name)
                 new_ingredient = Ingredient(name=ingredient_name)
                 db.add(new_ingredient)
                 await db.flush()
                 ingredients.append(new_ingredient)
 
         # Создаем рецепт
-        print("🍳 Создаем объект рецепта...")
+        logger.info("Создаем объект рецепта...")
         db_recipe = Recipe(
             title=recipe.title,
             cooking_time=recipe.cooking_time,
             description=recipe.description,
-            ingredients=ingredients
+            ingredients=ingredients,
         )
         db.add(db_recipe)
         await db.commit()
         await db.refresh(db_recipe)
 
         # Явно загружаем ингредиенты для возврата
-        await db.refresh(db_recipe, ['ingredients'])
+        await db.refresh(db_recipe, ["ingredients"])
 
-        print(f"✅ Рецепт '{recipe.title}' успешно создан с ID: {db_recipe.id}")
+        logger.info("Рецепт '%s' успешно создан с ID: %s", recipe.title, db_recipe.id)
         return db_recipe
 
-    async def get_ingredients(self, db: AsyncSession) -> List[Ingredient]:
+    async def get_ingredients(self, db: AsyncSession) -> Sequence[Ingredient]:
         """
         Получить все ингредиенты
         """
-        print("📋 Получаем список всех ингредиентов...")
+        logger.info("Получаем список всех ингредиентов...")
         query = select(Ingredient)
         result = await db.execute(query)
         ingredients = result.scalars().all()
 
-        print(f"✅ Найдено {len(ingredients)} ингредиентов")
+        logger.info("Найдено %s ингредиентов", len(ingredients))
         return ingredients
 
 
 # Создаем экземпляр класса для использования
 recipe_crud = CRUDRecipe()
-print("✅ CRUD операции созданы и готовы к использованию!")
